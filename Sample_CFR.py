@@ -19,6 +19,7 @@ class InformationSet(object):
         n_action: the number of action
         reach_pr: the probability of reaching this information set'''
         self.player = len(history) % 2
+        self.length = int(len(history) / 2)
         self.key = key
         self.history = [history]
         self.n_actions = n_actions
@@ -118,14 +119,14 @@ def terminal_util(history, player):
     if n <= Horizon:
         if evader_action in pursuer_action:
             if player == 0:
-                return -1 * Delta ** n
+                return -10 * Delta ** n
             else:
-                return Delta ** n
+                return 10 * Delta ** n
         else:
             if player == 0:
-                return 1
+                return 10
             else:
-                return -1
+                return -10
 
 
 #sample action according to sample_strategy, return sampled action and action_probability

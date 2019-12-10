@@ -6,16 +6,19 @@ import Sample_CFR as cfr
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import torch.utils.data as Data
+import logging
 
-N_iteration = 10 #number of iteration when training
+N_iteration = 100 #number of iteration when training
 LearningRate_adv = 0.001#learning rate of advantage network
-Iteration = 10 #number of iteration in CFR
+Iteration = 50 #number of iteration in CFR
 N_traversal = 10 #number of sampling the game tree
-n_player = 3
+n_player = 5
 Horizon = 3
 n_police = 2
 BATCH_SIZE = 50
 
+LOG_FORMAT = "%(asctime)s - %(levelname)s - %(message)s"
+logging.basicConfig(filename='my.log', level=logging.INFO, format=LOG_FORMAT)
 
 #define loss function
 def my_loss(x, y):
@@ -68,8 +71,10 @@ def train_network(memory, model):
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-            plt_loss.append(loss.item())
-            print('interation:', t, '|step: ', step, '|loss: ', loss.item())
+        out = model(train_data)
+        loss = my_loss(out, target_data)
+        plt_loss.append(loss.item())
+        print('interation:', t, '|loss: ', loss.item())
     plt.plot(plt_loss)
     plt.show()
     return model
@@ -84,7 +89,7 @@ def cfr_traversal(history, player, model_1, model_2, memory_1, memory_2, t, info
     action_utils = np.zeros(info.n_actions)
     if info.player == player:
         strategy = get_strategy(model_1, info)
-        utility = 0
+        util = 0
         for p, a in enumerate(info.action):
             next_history = history[:]
             next_history.append(a)
@@ -115,36 +120,38 @@ def get_strategy(model, info):
     if total > 0:
         strategy = regret / total
     else:
-        #strategy = np.zeros(info.n_actions) + 1. / float(info.n_actions)
-        strategy = np.zeros(info.n_actions)
-        max_regret = max(regret)
-        for i, j in enumerate(regret):
-            if j == max_regret:
-                strategy[i] = 1
+        strategy = np.zeros(info.n_actions) + 1. / float(info.n_actions)
+        #strategy = np.zeros(info.n_actions)
+        #max_regret = max(regret)
+        #for i, j in enumerate(regret):
+            #if j == max_regret:
+                #strategy[i] = 1
     return strategy
 
 
 #connect the data info.mark and action
 def connect(info, a):
     if info.player == 1:
-        data = np.zeros(Horizon * 2 + n_police)
+        data = np.zeros((Horizon - 1) * 2 + n_police + 1)
         j = 0
         for i in info.mark:
             for z in range(len(i)):
                 data[j] = i[z]
                 j = j + 1
-        j = 0
+        k = 0
         for z in range(len(a)):
-            data[Horizon + j] = a[z]
-            j = j + 1
+            data[j + k] = a[z]
+            k = k + 1
+        data[(Horizon - 1) * 2 + n_police] = info.length
     else:
-        data = np.zeros(n_player + 1)
+        data = np.zeros(n_player + 2)
         data[0] = info.mark[0]
         j = 1
         for i in info.mark[1]:
             data[j] = i
             j = j + 1
         data[j] = a
+        data[n_player + 1] = info.length
     return data
 
 
@@ -162,7 +169,7 @@ def memory_add(memory, info, t, regret):
 #evaluation
 def real_play(model_1, model_2, history, graph, info_set):
     if cfr.is_terminal(history):
-        return cfr.terminal_util(history, 1)
+        return cfr.terminal_util(history, 0)
     else:
         n = len(history)
         is_player = n % 2
@@ -207,9 +214,11 @@ def evaluate_model(model, memory):
     out = model(train_data)
     x = [i for i in range(len(out))]
     target = []
-    for i in range(len(memory)):
-        target.append(memory[i][2])
+    time = []
     out = out.detach().numpy()
+    for i in range(len(memory)):
+        target.append(memory[i][2] * (memory[i][1] + 1))
+        out[i] = out[i] * (memory[i][1] + 1)
     plt.scatter(x, out, color="blue")
     plt.scatter(x, target, color="red")
     plt.show()
@@ -221,8 +230,8 @@ def main():
     graph = Graph(length, width)
     info_set = {}
     history = [2, (1, 6)]
-    adv_model_1 = Net(n_player + 1, 50, 1)
-    adv_model_2 = Net((Horizon) * 2 + n_police, 50, 1)
+    adv_model_1 = Net(n_player + 2, 50, 1)
+    adv_model_2 = Net((Horizon - 1) * 2 + n_police + 1, 50, 1)
     adv_memory_1 = []
     adv_memory_2 = []
     strategy_memory_1 = []
@@ -232,29 +241,34 @@ def main():
        for k in range(N_traversal):
             cfr_traversal(history, 0, adv_model_1, adv_model_2, adv_memory_1, strategy_memory_2, t, info_set, graph)
        for k in range(N_traversal):
-            cfr_traversal(history, 1, adv_model_2, adv_model_1, adv_memory_2, strategy_memory_1, t, info_set, graph)
+           cfr_traversal(history, 1, adv_model_2, adv_model_1, adv_memory_2, strategy_memory_1, t, info_set, graph)
        start_time = datetime.datetime.now()
        adv_model_1= train_network(adv_memory_1, adv_model_1)
        end_time = datetime.datetime.now()
        print("interation:{}, player 1 length of memory:{}, time:{}".format(t, len(adv_memory_1), end_time-start_time))
+       logging.info("interation:{}, player 1 length of memory:{}, time:{}".format(t, len(adv_memory_1), end_time-start_time))
        start_time = datetime.datetime.now()
        adv_model_2= train_network(adv_memory_2, adv_model_2)
        end_time = datetime.datetime.now()
        print("interation:{}, player 2 length of memory:{}, time:{}".format(t, len(adv_memory_2), end_time-start_time))
-       evaluate_model(adv_model_1, adv_memory_1)
-       evaluate_model(adv_model_2, adv_memory_2)
-       adv_model_1 = Net(n_player + 1, 50, 1)
-       adv_model_2 = Net((Horizon) * 2 + n_police, 50, 1)
-       #str_model_1 = Net(n_player + 1, 50, 1)
-       #str_model_2 = Net((Horizon) * 2 + n_police, 50, 1)
-       #str_model_1 = train_network(strategy_memory_1, str_model_1)
-       #str_model_2 = train_network(strategy_memory_2, str_model_2)
-       #utility.append(real_play(str_model_1, str_model_2, history, graph, info_set))
-       #print("utility: ", utility)
+       logging.info("interation:{}, player 2 length of memory:{}, time:{}".format(t, len(adv_memory_2), end_time-start_time))
+       #evaluate_model(adv_model_1, adv_memory_1)
+       #evaluate_model(adv_model_2, adv_memory_2)
+       adv_model_1 = Net(n_player + 2, 50, 1)
+       adv_model_2 = Net((Horizon - 1) * 2 + n_police + 1, 50, 1)
+       str_model_1 = Net(n_player + 2, 50, 1)
+       str_model_2 = Net((Horizon - 1) * 2 + n_police + 1, 50, 1)
+       str_model_1 = train_network(strategy_memory_1, str_model_1)
+       str_model_2 = train_network(strategy_memory_2, str_model_2)
+       utility.append(real_play(str_model_1, str_model_2, history, graph, info_set))
+       print("utility: ", utility)
+       logging.info("iteration:{}, utility:{}".format(t, utility))
     #print(utility)
-    #plt.plot(utility)
-    #plt.show()
+    plt.plot(utility)
+    plt.show()
 
 if __name__ == '__main__':
     main()
-
+    '''info = cfr.InformationSet('sfsdf',[2,(1,6),3],[2,3],2)
+    a = [2, 3]
+    print(connect(info, a))'''
