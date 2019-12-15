@@ -6,6 +6,7 @@ import Sample_CFR as cfr
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import torch.utils.data as Data
+import logging
 
 Training_iteration = 1000  # number of iteration when training
 LearningRate_adv = 0.001  # learning rate of advantage network
@@ -15,6 +16,9 @@ n_player = 3
 Horizon = 3
 n_police = 2
 BATCH_SIZE = 16
+
+LOG_FORMAT = "%(asctime)s - %(levelname)s - %(message)s"
+logging.basicConfig(filename='my.log', level=logging.INFO, format=LOG_FORMAT)
 
 
 class My_loss(torch.nn.Module):
@@ -35,25 +39,25 @@ def my_loss(x, y):
     return loss
 
 
-class Net(torch.nn.Module):
+class Net_0(torch.nn.Module):
     def __init__(self, n_feature, n_hidden, n_output):
-        super(Net, self).__init__()
+        super(Net_0, self).__init__()
         self.hidden1 = torch.nn.Linear(n_feature, n_hidden)
         self.hidden2 = torch.nn.Linear(n_hidden, n_hidden)
-        self.hidden3 = torch.nn.Linear(n_hidden, n_hidden)
+#       self.hidden3 = torch.nn.Linear(n_hidden, n_hidden)
         self.out = torch.nn.Linear(n_hidden, n_output)
 
     def forward(self, x):
         x = x.float()
         x = F.relu(self.hidden1(x))
         x = F.relu(self.hidden2(x))
-        x = F.relu(self.hidden3(x))
+#       x = F.relu(self.hidden3(x))
         x = self.out(x)
         return x
 
 class Net_1(torch.nn.Module):
     def __init__(self, n_feature, n_hidden, n_output):
-        super(Net, self).__init__()
+        super(Net_1, self).__init__()
         self.hidden1 = torch.nn.Linear(n_feature, n_hidden)
         self.hidden2 = torch.nn.Linear(n_hidden, n_hidden)
         self.hidden3 = torch.nn.Linear(n_hidden, n_hidden)
@@ -75,18 +79,17 @@ def cfr_traversal(history, player, opponent, t, info_set, graph, pr_1=1., pr_2=1
 
     if info.player == player.player_id:
         action_utils = np.zeros(info.n_actions)
-        strategy = get_strategy(player.model, info)
+        strategy = get_strategy(player.adv_model, info)
         for i, a in enumerate(info.action):
             next_history = history[:]
             next_history.append(a)
-            action_utils[i] = cfr_traversal(next_history, player, opponent, t, info_set, graph, pr_1 * strategy[i],
-                                            pr_2)
+            action_utils[i] = cfr_traversal(next_history, player, opponent, t, info_set, graph, pr_1 * strategy[i], pr_2)
         util = sum(action_utils * strategy)
         regret = (action_utils - util) * pr_2
         player.adv_memory_add(info, t + 1, regret)
         return util
     else:
-        strategy = get_strategy(opponent.model, info)
+        strategy = get_strategy(opponent.adv_model, info)
         opponent.strategy_memory_add(info, t + 1, strategy)
         a, action_p = cfr.sample_action(info, strategy)
         next_history = history[:]
@@ -100,6 +103,7 @@ def get_strategy(model, info):
     for i, a in enumerate(info.action):
         data = connect(info, a)
         data = torch.from_numpy(data)
+        #print(data)
         regret[i] = model(data)
 
     total = float(sum(regret))
@@ -116,27 +120,27 @@ def get_strategy(model, info):
 
 
 # connect the data info.mark and action
-def connect(info, action_list):
+def connect(info, action):
     if info.player == 1:
-        data = np.zeros(Horizon * 2 + n_police)
-
+        data = np.zeros((Horizon - 1) * 2 + n_police + 1)
         j = 0
-        for mark in info.mark:
-            for z in range(len(mark)):
-                data[j] = mark[z]
-                j += 1
-
-        # policy
-        for z in range(len(action_list)):
-            data[Horizon * 2 - 1 + z] = action_list[z]
+        #print(info.mark)
+        for i in info.mark:
+            for z in range(len(i)):
+                data[j] = i[z]
+                j = j + 1
+        for z in range(len(action)):
+            data[(Horizon - 1) * 2 - 1 + z] = action[z]
+        data[(Horizon - 1) * 2 + n_police] = info.length
     else:
-        data = np.zeros(n_player + 1)
+        data = np.zeros(n_player + 2)
         data[0] = info.mark[0]
         j = 1
-        for mark in info.mark[1]:
-            data[j] = mark
-            j += 1
-        data[j] = action_list
+        for i in info.mark[1]:
+            data[j] = i
+            j = j + 1
+        data[j] = action
+        data[n_player + 1] = info.length
     return data
 
 
@@ -175,17 +179,17 @@ def real_play(model_1, model_2, history, graph, info_set):
 class Player(object):
     def __init__(self, player_id):
         self.player_id = player_id
-        self.model = self._build_net()
+        self.adv_model = self._build_net()
+        self.strategy_model = self._build_net()
         self.adv_memory = []
         self.strategy_memory = []
 
     # build model for player
     def _build_net(self):
         if self.player_id == 0:
-            model = Net(n_player + 1, 50, 1)
+            model = Net_0(n_player + 2, 50, 1)
         else:
-            model = Net(Horizon * 2 + n_police, 50, 1)
-
+            model = Net_1((Horizon - 1) * 2 + n_police + 1, 50, 1)
         model.apply(self.init_weights)
         return model
 
@@ -209,9 +213,9 @@ class Player(object):
             self.strategy_memory.append(experience)
 
     # train a network here, return model
-    def train_network(self):
+    def train_adv_network(self):
         plt_loss = []
-        optimizer = torch.optim.SGD(self.model.parameters(), lr=LearningRate_adv)
+        optimizer = torch.optim.SGD(self.adv_model.parameters(), lr=LearningRate_adv)
         train_data = torch.from_numpy(self.adv_memory[0][0])
         train_data = train_data.unsqueeze(0)
         target_data = torch.tensor([self.adv_memory[0][1], self.adv_memory[0][2]])
@@ -228,7 +232,7 @@ class Player(object):
         loader = Data.DataLoader(dataset=torch_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=2)
         for t in range(Training_iteration):
             for step, (batch_x, batch_y) in enumerate(loader):
-                out = self.model(batch_x)
+                out = self.adv_model(batch_x)
                 criterion = My_loss()
                 loss = criterion(out, batch_y)
                 # loss = my_loss(out, batch_y)
@@ -238,11 +242,49 @@ class Player(object):
                 # print(self.model.hidden1.weight.grad)
                 optimizer.step()
                 print('player id:', self.player_id, 'interation:', t, '|batch step: ', step, '|loss: ', loss.item())
-        out = self.model(train_data)
-        criterion = My_loss()
-        loss = criterion(out, target_data)
-        plt_loss.append(loss.item())
-        print('interation:', t, '|loss: ', loss.item())
+            out = self.adv_model(train_data)
+            criterion = My_loss()
+            loss = criterion(out, target_data)
+            plt_loss.append(loss.item())
+            print('interation:', t, '|loss: ', loss.item())
+        plt.plot(plt_loss)
+        plt.show()
+    def train_strategy_network(self):
+        plt_loss = []
+        optimizer = torch.optim.SGD(self.strategy_model.parameters(), lr=LearningRate_adv)
+        train_data = torch.from_numpy(self.strategy_memory[0][0])
+        train_data = train_data.unsqueeze(0)
+        target_data = torch.tensor([self.strategy_memory[0][1], self.strategy_memory[0][2]])
+        target_data = target_data.unsqueeze(0)
+        for i in range(len(self.strategy_memory)):
+            if i != 0:
+                b = torch.from_numpy(self.strategy_memory[i][0])
+                b = b.unsqueeze(0)
+                c = torch.tensor([self.strategy_memory[i][1], self.strategy_memory[i][2]])
+                c = c.unsqueeze(0)
+                train_data = torch.cat((train_data, b), dim=0, out=None)
+                target_data = torch.cat((target_data, c), dim=0, out=None)
+        torch_dataset = Data.TensorDataset(train_data, target_data)
+        loader = Data.DataLoader(dataset=torch_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=2)
+        for t in range(Training_iteration):
+            for step, (batch_x, batch_y) in enumerate(loader):
+                out = self.strategy_model(batch_x)
+                criterion = My_loss()
+                loss = criterion(out, batch_y)
+                # loss = my_loss(out, batch_y)
+                optimizer.zero_grad()
+                # print(self.model.hidden1.weight.grad)
+                loss.backward()
+                # print(self.model.hidden1.weight.grad)
+                optimizer.step()
+                print('player id:', self.player_id, 'interation:', t, '|batch step: ', step, '|loss: ', loss.item())
+            out = self.strategy_model(train_data)
+            criterion = My_loss()
+            loss = criterion(out, target_data)
+            plt_loss.append(loss.item())
+            print('interation:', t, '|loss: ', loss.item())
+        plt.plot(plt_loss)
+        plt.show()
     def evaluate_model(self):
         train_data = torch.from_numpy(self.adv_memory[0][0])
         train_data = train_data.unsqueeze(0)
@@ -273,15 +315,23 @@ def main():
     info_set = {}
     history = [2, (1, 6)]
     player_list = [Player(0), Player(1)]
-
+    utility = []
+    start_time1 = datetime.datetime.now()
     for t in range(CFR_Iteration):
         for player in player_list:
             opponent = player_list[1 - player.player_id]
             for k in range(N_traversal):
                 cfr_traversal(history, player, opponent, t, info_set, graph)
-            player.model.apply(player.init_weights)
-            player.train_network()
-            exit(0)
+            player.adv_model.apply(player.init_weights)
+            player.train_adv_network()
+        for player in player_list:
+            player.strategy_model.apply(player.init_weights)
+            player.train_strategy_network()
+        utility.append(real_play(player_list[0].strategy_model, player_list[1].strategy_model, history, graph, info_set))
+        end_time1 = datetime.datetime.now()
+        print("utility: ", utility, "time: ", end_time1 - start_time1)
+        logging.info("Iteration:{}, utility:{}, time:{} ".format(t, utility, end_time1 - start_time1))
+        exit(0)
         # player.evaluate_model()
 
 
