@@ -8,14 +8,14 @@ import matplotlib.pyplot as plt
 import torch.utils.data as Data
 import logging
 
-N_iteration = 100 #number of iteration when training
+N_iteration = 1000 #number of iteration when training
 LearningRate_adv = 0.001#learning rate of advantage network
 Iteration = 50 #number of iteration in CFR
 N_traversal = 10 #number of sampling the game tree
-n_player = 5
-Horizon = 3
+n_player = 3
+Horizon = 5
 n_police = 2
-BATCH_SIZE = 50
+BATCH_SIZE = 16
 
 LOG_FORMAT = "%(asctime)s - %(levelname)s - %(message)s"
 logging.basicConfig(filename='my.log', level=logging.INFO, format=LOG_FORMAT)
@@ -29,9 +29,9 @@ def my_loss(x, y):
     return loss
 
 
-class Net(torch.nn.Module):
+class Net_2(torch.nn.Module):
     def __init__(self, n_feature, n_hidden, n_output):
-        super(Net, self).__init__()
+        super(Net_2, self).__init__()
         self.hidden1 = torch.nn.Linear(n_feature, n_hidden)
         self.hidden2 = torch.nn.Linear(n_hidden, n_hidden)
         self.hidden3 = torch.nn.Linear(n_hidden, n_hidden)
@@ -42,6 +42,21 @@ class Net(torch.nn.Module):
         x = F.relu(self.hidden1(x))
         x = F.relu(self.hidden2(x))
         x = F.relu(self.hidden3(x))
+        x = self.out(x)
+        return x
+
+
+class Net_1(torch.nn.Module):
+    def __init__(self, n_feature, n_hidden, n_output):
+        super(Net_1, self).__init__()
+        self.hidden1 = torch.nn.Linear(n_feature, n_hidden)
+        self.hidden2 = torch.nn.Linear(n_hidden, n_hidden)
+        self.out = torch.nn.Linear(n_hidden, n_output)
+
+    def forward(self, x):
+        x = x.float()
+        x = F.relu(self.hidden1(x))
+        x = F.relu(self.hidden2(x))
         x = self.out(x)
         return x
 
@@ -230,8 +245,8 @@ def main():
     graph = Graph(length, width)
     info_set = {}
     history = [2, (1, 6)]
-    adv_model_1 = Net(n_player + 2, 50, 1)
-    adv_model_2 = Net((Horizon - 1) * 2 + n_police + 1, 50, 1)
+    adv_model_1 = Net_1(n_player + 2, 30, 1)
+    adv_model_2 = Net_2((Horizon - 1) * 2 + n_police + 1, 30, 1)
     adv_memory_1 = []
     adv_memory_2 = []
     strategy_memory_1 = []
@@ -254,10 +269,10 @@ def main():
        logging.info("interation:{}, player 2 length of memory:{}, time:{}".format(t, len(adv_memory_2), end_time-start_time))
        #evaluate_model(adv_model_1, adv_memory_1)
        #evaluate_model(adv_model_2, adv_memory_2)
-       adv_model_1 = Net(n_player + 2, 50, 1)
-       adv_model_2 = Net((Horizon - 1) * 2 + n_police + 1, 50, 1)
-       str_model_1 = Net(n_player + 2, 50, 1)
-       str_model_2 = Net((Horizon - 1) * 2 + n_police + 1, 50, 1)
+       adv_model_1 = Net_1(n_player + 2, 30, 1)
+       adv_model_2 = Net_2((Horizon - 1) * 2 + n_police + 1, 30, 1)
+       str_model_1 = Net_1(n_player + 2, 30, 1)
+       str_model_2 = Net_2((Horizon - 1) * 2 + n_police + 1, 30, 1)
        str_model_1 = train_network(strategy_memory_1, str_model_1)
        str_model_2 = train_network(strategy_memory_2, str_model_2)
        utility.append(real_play(str_model_1, str_model_2, history, graph, info_set))

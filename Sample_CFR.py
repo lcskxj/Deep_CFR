@@ -3,7 +3,6 @@ import numpy as np
 import itertools
 import csv
 import random
-import datetime
 
 Horizon = 3
 Delta = 0.9
