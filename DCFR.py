@@ -7,9 +7,10 @@ import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import torch.utils.data as Data
 import logging
+import math
 
 plt.ion()
-Training_epoch = 1000  # number of epoch when training
+Training_epoch = 20  # number of epoch when training
 LearningRate_adv = 0.01  # learning rate of advantage network
 CFR_Iteration = 100  # number of iteration in CFR
 N_traversal = 10  # number of sampling the game tree
@@ -50,7 +51,7 @@ class Net_0(torch.nn.Module):
     def forward(self, x):
         x = x.float()
         x = F.relu(self.hidden1(x))
-        x = F.relu(self.hidden2(x))
+        x = self.hidden2(x)
 #       x = F.relu(self.hidden3(x))
         x = self.out(x)
         return x
@@ -68,7 +69,7 @@ class Net_1(torch.nn.Module):
         x = x.float()
         x = F.relu(self.hidden1(x))
         x = F.relu(self.hidden2(x))
-        x = F.relu(self.hidden3(x))
+        x = self.hidden3(x)
         x = self.out(x)
         return x
 
@@ -197,10 +198,10 @@ class Player(object):
 
     def init_weights(self, m):
         if type(m) == torch.nn.Linear:
-            print('************reset weights**************')
-            y = m.in_features
-            m.weight.data.normal_(0.0, 1 / np.sqrt(y))
-            m.bias.data.fill_(0)
+            print('reset weights......')
+            stdv = 1. / math.sqrt(m.weight.size(1))
+            m.weight.data.uniform_(-stdv, stdv)
+            m.bias.data.uniform_(-stdv, stdv)
 
     # add the data to the memory
     def adv_memory_add(self, info, t, regret):
@@ -217,17 +218,18 @@ class Player(object):
             self.strategy_memory.append(experience)
 
     # train a network here, return model
-    def train_network(self, train_adv):
-        criterion = My_loss()
+    def train_network(self, criterion, optimizer, train_adv):
         plot_loss = []
         if train_adv:
-            train_data = [i[0] for i in self.adv_memory]
-            label_data = [i[1:] for i in self.adv_memory]
+            memory = self.adv_memory
+            model = self.adv_model
         else:
-            train_data = [i[0] for i in self.strategy_memory]
-            label_data = [i[1:] for i in self.strategy_memory]
+            memory = self.strategy_memory
+            model = self.strategy_model
 
-        if len(train_data) > 1000:
+        train_data = [i[0] for i in memory]
+        label_data = [i[1:] for i in memory]
+        if len(train_data) > 10000:
             batch_size = 64
         else:
             batch_size = 16
@@ -239,42 +241,23 @@ class Player(object):
 
         for epoch in range(Training_epoch):
             for step, (batch_x, batch_y) in enumerate(loader):
-                if train_adv:
-                    out = self.adv_model(batch_x)
-                else:
-                    out = self.strategy_model(batch_x)
-
+                out = model(batch_x)
                 loss = criterion(out, batch_y)
+                print(loss.item())
                 # loss = my_loss(out, batch_y)
-                optimizer = torch.optim.SGD(self.adv_model.parameters(), lr=LearningRate_adv)
                 optimizer.zero_grad()
                 loss.backward()
-                # print(self.adv_model.hidden1.weight.grad)
-                # print(self.adv_model.hidden1.bias.grad)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 1)
+                print(model.hidden2.weight.grad)
+                # print(model.hidden1.bias.grad)
                 optimizer.step()
 
-            if train_adv:
-                out = self.adv_model(train_data)
-            else:
-                out = self.strategy_model(train_data)
-
+            out = model(train_data)
             loss = criterion(out, label_data)
             plot_loss.append(loss)
             print('player id:', self.player_id, 'epoch:', epoch, '|loss: ', loss.item())
 
         plt.plot(plot_loss)
-        plt.show()
-
-    def evaluate_model(self, train_data, label_data):
-        # for p in self.adv_model.parameters():
-        #     print(p)
-        out = self.adv_model(train_data)
-        out = out.squeeze(1)
-        out = out.detach().numpy()
-        label = label_data[:, 1].numpy()
-        x = list(range(0, len(label)))
-        plt.scatter(x, out, color="blue")
-        plt.scatter(x, label, color="red")
         plt.show()
 
 
@@ -283,15 +266,20 @@ def main():
     info_set = {}
     history = [2, (1, 6)]
     player_list = [Player(0), Player(1)]
+    criterion = My_loss()
     utility = []
     start_time1 = datetime.datetime.now()
     for t in range(CFR_Iteration):
+        print('************************************')
+        print('T:', t)
         for player in player_list:
             opponent = player_list[1 - player.player_id]
+            print("CFR sampling......")
             for k in range(N_traversal):
                 cfr_traversal(history, player, opponent, t, info_set, graph)
             player.adv_model.apply(player.init_weights)
-            player.train_network(train_adv=True)
+            optimizer = torch.optim.Adam(player.adv_model.parameters(), lr=LearningRate_adv)
+            player.train_network(criterion, optimizer, train_adv=True)
             # player.evaluate_model(train_data, label)
         # for player in player_list:
         #     #player.strategy_model.apply(player.init_weights)
