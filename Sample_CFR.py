@@ -4,7 +4,7 @@ import itertools
 import csv
 import random
 
-Horizon = 3
+Horizon = 5
 Delta = 0.9
 epsilon = 1
 
@@ -118,9 +118,9 @@ def terminal_util(history, player):
     if n <= Horizon:
         if evader_action in pursuer_action:
             if player == 0:
-                return -10 * Delta ** n
+                return -10 #* Delta ** n
             else:
-                return 10 * Delta ** n
+                return 10 #* Delta ** n
         else:
             if player == 0:
                 return 10
