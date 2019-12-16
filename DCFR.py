@@ -9,11 +9,11 @@ import torch.utils.data as Data
 import logging
 
 Training_iteration = 1000  # number of iteration when training
-LearningRate_adv = 0.001  # learning rate of advantage network
-CFR_Iteration = 10  # number of iteration in CFR
+LearningRate_adv = 0.01  # learning rate of advantage network
+CFR_Iteration = 100  # number of iteration in CFR
 N_traversal = 10  # number of sampling the game tree
 n_player = 3
-Horizon = 3
+Horizon = 5
 n_police = 2
 BATCH_SIZE = 16
 
@@ -103,9 +103,9 @@ def get_strategy(model, info):
     for i, a in enumerate(info.action):
         data = connect(info, a)
         data = torch.from_numpy(data)
-        #print(data)
+        # print(data)
         regret[i] = model(data)
-
+        #print("djf", regret[i])
     total = float(sum(regret))
     if total > 0.0:
         strategy = regret / total
@@ -124,7 +124,7 @@ def connect(info, action):
     if info.player == 1:
         data = np.zeros((Horizon - 1) * 2 + n_police + 1)
         j = 0
-        #print(info.mark)
+        # print(info.mark)
         for i in info.mark:
             for z in range(len(i)):
                 data[j] = i[z]
@@ -190,13 +190,15 @@ class Player(object):
             model = Net_0(n_player + 2, 50, 1)
         else:
             model = Net_1((Horizon - 1) * 2 + n_police + 1, 50, 1)
-        model.apply(self.init_weights)
+        #model.apply(self.init_weights)
         return model
 
-    def init_weights(self, m):
+    '''def init_weights(self, m):
         if type(m) == torch.nn.Linear:
-            m.weight.data.fill_(0.0)
-            m.bias.data.fill_(0.0)
+            print('************reset weights**************')
+            y = m.in_features
+            m.weight.data.normal_(0.0, 1 / np.sqrt(y))
+            m.bias.data.fill_(0)'''
 
     # add the data to the memory
     def adv_memory_add(self, info, t, regret):
@@ -213,102 +215,62 @@ class Player(object):
             self.strategy_memory.append(experience)
 
     # train a network here, return model
-    def train_adv_network(self):
-        plt_loss = []
-        optimizer = torch.optim.SGD(self.adv_model.parameters(), lr=LearningRate_adv)
-        train_data = torch.from_numpy(self.adv_memory[0][0])
-        train_data = train_data.unsqueeze(0)
-        target_data = torch.tensor([self.adv_memory[0][1], self.adv_memory[0][2]])
-        target_data = target_data.unsqueeze(0)
-        for i in range(len(self.adv_memory)):
-            if i != 0:
-                b = torch.from_numpy(self.adv_memory[i][0])
-                b = b.unsqueeze(0)
-                c = torch.tensor([self.adv_memory[i][1], self.adv_memory[i][2]])
-                c = c.unsqueeze(0)
-                train_data = torch.cat((train_data, b), dim=0, out=None)
-                target_data = torch.cat((target_data, c), dim=0, out=None)
-        torch_dataset = Data.TensorDataset(train_data, target_data)
-        loader = Data.DataLoader(dataset=torch_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=2)
-        for t in range(Training_iteration):
-            for step, (batch_x, batch_y) in enumerate(loader):
-                out = self.adv_model(batch_x)
-                criterion = My_loss()
-                loss = criterion(out, batch_y)
-                # loss = my_loss(out, batch_y)
-                optimizer.zero_grad()
-                # print(self.model.hidden1.weight.grad)
-                loss.backward()
-                # print(self.model.hidden1.weight.grad)
-                optimizer.step()
-                print('player id:', self.player_id, 'interation:', t, '|batch step: ', step, '|loss: ', loss.item())
-            out = self.adv_model(train_data)
-            criterion = My_loss()
-            loss = criterion(out, target_data)
-            plt_loss.append(loss.item())
-            print('interation:', t, '|loss: ', loss.item())
-        plt.plot(plt_loss)
-        plt.show()
-    def train_strategy_network(self):
-        plt_loss = []
-        optimizer = torch.optim.SGD(self.strategy_model.parameters(), lr=LearningRate_adv)
-        train_data = torch.from_numpy(self.strategy_memory[0][0])
-        train_data = train_data.unsqueeze(0)
-        target_data = torch.tensor([self.strategy_memory[0][1], self.strategy_memory[0][2]])
-        target_data = target_data.unsqueeze(0)
-        for i in range(len(self.strategy_memory)):
-            if i != 0:
-                b = torch.from_numpy(self.strategy_memory[i][0])
-                b = b.unsqueeze(0)
-                c = torch.tensor([self.strategy_memory[i][1], self.strategy_memory[i][2]])
-                c = c.unsqueeze(0)
-                train_data = torch.cat((train_data, b), dim=0, out=None)
-                target_data = torch.cat((target_data, c), dim=0, out=None)
-        torch_dataset = Data.TensorDataset(train_data, target_data)
-        loader = Data.DataLoader(dataset=torch_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=2)
-        for t in range(Training_iteration):
-            for step, (batch_x, batch_y) in enumerate(loader):
-                out = self.strategy_model(batch_x)
-                criterion = My_loss()
-                loss = criterion(out, batch_y)
-                # loss = my_loss(out, batch_y)
-                optimizer.zero_grad()
-                # print(self.model.hidden1.weight.grad)
-                loss.backward()
-                # print(self.model.hidden1.weight.grad)
-                optimizer.step()
-                print('player id:', self.player_id, 'interation:', t, '|batch step: ', step, '|loss: ', loss.item())
-            out = self.strategy_model(train_data)
-            criterion = My_loss()
-            loss = criterion(out, target_data)
-            plt_loss.append(loss.item())
-            print('interation:', t, '|loss: ', loss.item())
-        plt.plot(plt_loss)
-        plt.show()
-    def evaluate_model(self):
-        train_data = torch.from_numpy(self.adv_memory[0][0])
-        train_data = train_data.unsqueeze(0)
-        target_data = torch.tensor([self.adv_memory[0][1], self.adv_memory[0][2]])
-        target_data = target_data.unsqueeze(0)
-        for i in range(1, len(self.adv_memory)):
-            b = torch.from_numpy(self.adv_memory[i][0])
-            b = b.unsqueeze(0)
-            c = torch.tensor([self.adv_memory[i][1], self.adv_memory[i][2]])
-            c = c.unsqueeze(0)
-            train_data = torch.cat((train_data, b), dim=0, out=None)
-            target_data = torch.cat((target_data, c), dim=0, out=None)
-        out = self.model(train_data)
-        x = [i for i in range(len(out))]
-        target = []
-        for i in range(len(self.adv_memory)):
-            target.append(self.adv_memory[i][2])
+    def train_network(self, Flag):
+        if Flag == True:
+            train_data = [i[0] for i in self.adv_memory]
+            label_data = [i[1:] for i in self.adv_memory]
+            train_data = torch.tensor(train_data)
+            label_data = torch.tensor(label_data)
+            torch_dataset = Data.TensorDataset(train_data, label_data)
+            loader = Data.DataLoader(dataset=torch_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=2)
+            for t in range(Training_iteration):
+                for step, (batch_x, batch_y) in enumerate(loader):
+                    out = self.adv_model(batch_x)
+                    criterion = My_loss()
+                    loss = criterion(out, batch_y)
+                    # loss = my_loss(out, batch_y)
+                    optimizer = torch.optim.SGD(self.adv_model.parameters(), lr=LearningRate_adv)
+                    optimizer.zero_grad()
+                    loss.backward()
+                    #print(self.adv_model.hidden1.weight.grad)
+                    #print(self.adv_model.hidden1.bias.grad)
+                    optimizer.step()
+                    print('player id:', self.player_id, 'interation:', t, '|batch step: ', step, '|loss: ', loss.item())
+            #return train_data, label_data
+        else:
+            train_data = [i[0] for i in self.strategy_memory]
+            label_data = [i[1:] for i in self.strategy_memory]
+            train_data = torch.tensor(train_data)
+            label_data = torch.tensor(label_data)
+            torch_dataset = Data.TensorDataset(train_data, label_data)
+            loader = Data.DataLoader(dataset=torch_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=2)
+            for t in range(Training_iteration):
+                for step, (batch_x, batch_y) in enumerate(loader):
+                    out = self.strategy_model(batch_x)
+                    criterion = My_loss()
+                    loss = criterion(out, batch_y)
+                    # loss = my_loss(out, batch_y)
+                    optimizer = torch.optim.SGD(self.adv_model.parameters(), lr=LearningRate_adv)
+                    optimizer.zero_grad()
+                    loss.backward()
+                    # print(self.adv_model.hidden1.weight.grad)
+                    # print(self.adv_model.hidden1.bias.grad)
+                    optimizer.step()
+                    print('player id:', self.player_id, 'interation:', t, '|batch step: ', step, '|loss: ', loss.item())
+            # return train_data, label_data
+
+
+    def evaluate_model(self, train_data, label_data):
+        # for p in self.adv_model.parameters():
+        #     print(p)
+        out = self.adv_model(train_data)
+        out = out.squeeze(1)
         out = out.detach().numpy()
-
-
-# plt.scatter(x, out, color="blue")
-# plt.scatter(x, target, color="red")
-# plt.show()
-
+        label = label_data[:, 1].numpy()
+        x = list(range(0, len(label)))
+        plt.scatter(x, out, color="blue")
+        plt.scatter(x, label, color="red")
+        plt.show()
 
 def main():
     graph = Graph(length=3, width=3)
@@ -322,17 +284,18 @@ def main():
             opponent = player_list[1 - player.player_id]
             for k in range(N_traversal):
                 cfr_traversal(history, player, opponent, t, info_set, graph)
-            player.adv_model.apply(player.init_weights)
-            player.train_adv_network()
+            #player.adv_model.apply(player.init_weights)
+            player.train_network(True)
+            # player.evaluate_model(train_data, label)
         for player in player_list:
-            player.strategy_model.apply(player.init_weights)
-            player.train_strategy_network()
+            #player.strategy_model.apply(player.init_weights)
+            player.train_network(False)
         utility.append(real_play(player_list[0].strategy_model, player_list[1].strategy_model, history, graph, info_set))
         end_time1 = datetime.datetime.now()
         print("utility: ", utility, "time: ", end_time1 - start_time1)
         logging.info("Iteration:{}, utility:{}, time:{} ".format(t, utility, end_time1 - start_time1))
         exit(0)
-        # player.evaluate_model()
+        #player.evaluate_model()
 
 
 # for param in player.model.parameters():
