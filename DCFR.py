@@ -216,6 +216,7 @@ class Player(object):
 
     # train a network here, return model
     def train_network(self, Flag):
+        plot_loss = []
         if Flag == True:
             train_data = [i[0] for i in self.adv_memory]
             label_data = [i[1:] for i in self.adv_memory]
@@ -237,6 +238,11 @@ class Player(object):
                     optimizer.step()
                     print('player id:', self.player_id, 'interation:', t, '|batch step: ', step, '|loss: ', loss.item())
             #return train_data, label_data
+                out = self.adv_model(train_data)
+                criterion = My_loss()
+                plot_loss.append(criterion(out, label_data))
+            plt.plot(plot_loss)
+            plt.show()
         else:
             train_data = [i[0] for i in self.strategy_memory]
             label_data = [i[1:] for i in self.strategy_memory]
@@ -258,6 +264,11 @@ class Player(object):
                     optimizer.step()
                     print('player id:', self.player_id, 'interation:', t, '|batch step: ', step, '|loss: ', loss.item())
             # return train_data, label_data
+                out = self.strategy_model(train_data)
+                criterion = My_loss()
+                plot_loss.append(criterion(out, label_data))
+            plt.plot(plot_loss)
+            plt.show()
 
 
     def evaluate_model(self, train_data, label_data):
