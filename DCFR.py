@@ -10,7 +10,7 @@ import logging
 import math
 
 plt.ion()
-Training_epoch = 20  # number of epoch when training
+Training_epoch = 300  # number of epoch when training
 LearningRate_adv = 0.01  # learning rate of advantage network
 CFR_Iteration = 100  # number of iteration in CFR
 N_traversal = 10  # number of sampling the game tree
@@ -243,12 +243,12 @@ class Player(object):
             for step, (batch_x, batch_y) in enumerate(loader):
                 out = model(batch_x)
                 loss = criterion(out, batch_y)
-                print(loss.item())
+                #print(loss.item())
                 # loss = my_loss(out, batch_y)
                 optimizer.zero_grad()
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 1)
-                print(model.hidden2.weight.grad)
+                #print(model.hidden2.weight.grad)
                 # print(model.hidden1.bias.grad)
                 optimizer.step()
 
@@ -281,13 +281,13 @@ def main():
             optimizer = torch.optim.Adam(player.adv_model.parameters(), lr=LearningRate_adv)
             player.train_network(criterion, optimizer, train_adv=True)
             # player.evaluate_model(train_data, label)
-        # for player in player_list:
-        #     #player.strategy_model.apply(player.init_weights)
-        #     player.train_network(train_adv=False)
-        # utility.append(real_play(player_list[0].strategy_model, player_list[1].strategy_model, history, graph, info_set))
-        # end_time1 = datetime.datetime.now()
-        # print("utility: ", utility, "time: ", end_time1 - start_time1)
-        # logging.info("Iteration:{}, utility:{}, time:{} ".format(t, utility, end_time1 - start_time1))
+        for player in player_list:
+            player.strategy_model.apply(player.init_weights)
+            player.train_network(train_adv=False)
+        utility.append(real_play(player_list[0].strategy_model, player_list[1].strategy_model, history, graph, info_set))
+        end_time1 = datetime.datetime.now()
+        print("utility: ", utility, "time: ", end_time1 - start_time1)
+        logging.info("Iteration:{}, utility:{}, time:{} ".format(t, utility, end_time1 - start_time1))
         #player.evaluate_model()
 
 
