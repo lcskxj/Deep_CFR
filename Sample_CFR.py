@@ -5,8 +5,9 @@ import csv
 import random
 
 Horizon = 5
-Delta = 0.9
+Delta = 0.8
 epsilon = 1
+EPS = 0.001
 
 
 class InformationSet(object):
@@ -26,13 +27,25 @@ class InformationSet(object):
         self.regret_sum = np.zeros(n_actions)
         self.strategy_sum = np.zeros(n_actions) + 1. / float(n_actions)
         self.strategy = np.zeros(n_actions) + 1. / float(n_actions)
+        self.average_strategy = np.zeros(n_actions)
         self.reach_pr = 0.
         if self.player == 0:
-            self.mark = history[-2:]
+            self.mark = history[:len(history) - 1]
         else:
             self.mark = []
             for j in range(1, len(history), 2):
                 self.mark.append(history[j])
+
+    def get_average_strategy(self):
+        total = sum(self.strategy_sum)
+        if total > 0:
+            strategy = self.strategy_sum / float(total)
+            strategy = np.where(strategy < EPS, 0., strategy)
+            total = sum(strategy)
+            strategy /= float(total)
+        else:
+            strategy = np.zeros(self.n_actions) + 1. / float(self.n_actions)
+        return strategy
 
 
 #judge if the history1 is in the history_list this is only for player 1 (police)
@@ -118,9 +131,9 @@ def terminal_util(history, player):
     if n <= Horizon:
         if evader_action in pursuer_action:
             if player == 0:
-                return -10 #* Delta ** n
+                return -10 * Delta ** n
             else:
-                return 10 #* Delta ** n
+                return 10 * Delta ** n
         else:
             if player == 0:
                 return 10
