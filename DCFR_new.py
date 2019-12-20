@@ -10,7 +10,7 @@ import logging
 import math
 
 plt.ion()
-Training_epoch = 100  # number of epoch when training
+Training_epoch = 500  # number of epoch when training
 LearningRate_adv = 0.01  # learning rate of advantage network
 CFR_Iteration = 100  # number of iteration in CFR
 N_traversal = 10  # number of sampling the game tree
@@ -107,7 +107,7 @@ def get_strategy(model, info):
         data = connect(info, a)
         data = torch.from_numpy(data)
         # print(data)
-        regret[i] = model(data)
+        regret[i] = max(model(data), 0)
         # print("djf", regret[i])
     total = float(sum(regret))
     if total > 0.0:
@@ -125,7 +125,7 @@ def get_strategy(model, info):
 # connect the data info.mark and action
 def connect(info, action):
     if info.player == 1:
-        data = np.zeros((Horizon - 1) * 2 + n_police + 1)
+        data = np.zeros((Horizon - 1) * 2 + n_police)
         j = 0
         # print(info.mark)
         for i in info.mark:
@@ -133,59 +133,82 @@ def connect(info, action):
                 data[j] = i[z]
                 j = j + 1
         for z in range(len(action)):
-            data[(Horizon - 1) * 2 - 1 + z] = action[z]
-        data[(Horizon - 1) * 2 + n_police] = info.length
+            data[(Horizon - 1) * 2 + z] = action[z]
+        #data[(Horizon - 1) * 2 + n_police] = info.length
     else:
-        data = np.zeros(n_player + 2)
-        data[0] = info.mark[0]
-        j = 1
-        for i in info.mark[1]:
-            data[j] = i
-            j = j + 1
-        data[j] = action
-        data[n_player + 1] = info.length
+        data = np.zeros((Horizon - 1) * n_player - n_police + 1)
+        j = 0
+        for i in info.mark:
+            if isinstance(i, int):
+                data[j] = i
+                j = j + 1
+            else:
+                for z in range(len(i)):
+                    data[j] = i[z]
+                    j = j + 1
+            data[(Horizon - 1) * n_player - n_police] = action
+        #data[n_player + 1] = info.length
     return data
 
 
 # evaluation
-def real_play(model_1, model_2, history, graph, info_set):
+# def real_play(model_1, model_2, history, graph, info_set):
+#     if cfr.is_terminal(history):
+#         return cfr.terminal_util(history, 1)
+#     else:
+#         n = len(history)
+#         is_player = n % 2
+#         info = cfr.get_information_set(info_set, history, graph)
+#         if is_player == 0:
+#             strategy = get_strategy(model_1, info)
+#             #print(strategy)
+#             v = np.zeros(info.n_actions)
+#             utility = 0
+#             for a in info.action:
+#                 p = info.action.index(a)
+#                 next_history = history[:]
+#                 next_history.append(a)
+#                 v[p] = real_play(model_1, model_2, next_history, graph, info_set)
+#                 utility += v[p] * strategy[p]
+#             return utility
+#         else:
+#             strategy = get_strategy(model_2, info)
+#             #print(strategy)
+#             v = np.zeros(info.n_actions)
+#             utility = 0
+#             for a in info.action:
+#                 p = info.action.index(a)
+#                 next_history = history[:]
+#                 next_history.append(a)
+#                 v[p] = real_play(model_1, model_2, next_history, graph, info_set)
+#                 utility += v[p] * strategy[p]
+#             return utility
+
+
+def real_play(history, graph, info_set):
     if cfr.is_terminal(history):
         return cfr.terminal_util(history, 1)
     else:
         n = len(history)
-        is_player = n % 2
         info = cfr.get_information_set(info_set, history, graph)
-        if is_player == 0:
-            strategy = get_strategy(model_1, info)
-            v = np.zeros(info.n_actions)
-            utility = 0
-            for a in info.action:
-                p = info.action.index(a)
-                next_history = history[:]
-                next_history.append(a)
-                v[p] = real_play(model_1, model_2, next_history, graph, info_set)
-                utility += v[p] * strategy[p]
-            return utility
-        else:
-            strategy = get_strategy(model_2, info)
-            v = np.zeros(info.n_actions)
-            utility = 0
-            for a in info.action:
-                p = info.action.index(a)
-                next_history = history[:]
-                next_history.append(a)
-                v[p] = real_play(model_1, model_2, next_history, graph, info_set)
-                utility += v[p] * strategy[p]
-            return utility
+        strategy = info.average_strategy
+        v = np.zeros(info.n_actions)
+        utility = 0
+        for p, a in enumerate(info.action):
+            next_history = history[:]
+            next_history.append(a)
+            v[p] = real_play(next_history, graph, info_set)
+            utility += v[p] * strategy[p]
+        return utility
 
 
 def data_exist(data, t, memory):
     index = -1
     for i in range(len(memory)):
-        if memory[i][1] == t:
-            if (memory[i][0] == data).all():
-                index = i
-                break
+        #if memory[i][1] == t:
+        if (memory[i][0] == data).all():
+            index = i
+            break
     return index
 
 
@@ -212,9 +235,9 @@ class Player(object):
     # build model for player
     def _build_net(self):
         if self.player_id == 0:
-            model = Net_0(n_player + 2, 50, 1)
+            model = Net_0((Horizon - 1) * n_player - n_police + 1 , 50, 1)
         else:
-            model = Net_1((Horizon - 1) * 2 + n_police + 1, 50, 1)
+            model = Net_1((Horizon - 1) * 2 + n_police, 50, 1)
         model.apply(self.init_weights)
         return model
 
@@ -288,6 +311,7 @@ class Player(object):
             loss = criterion(out, label_data)
             plot_loss.append(loss)
             print('player id:', self.player_id, 'epoch:', epoch, '|loss: ', loss.item())
+            #print(out, train_data, label_data)
 
         plt.plot(plot_loss)
         plt.show()
@@ -313,16 +337,25 @@ def main():
             optimizer = torch.optim.Adam(player.adv_model.parameters(), lr=LearningRate_adv)
             player.train_network(criterion, optimizer, train_adv=True)
             # player.evaluate_model(train_data, label)
-        for player in player_list:
-            criterion = My_loss()
-            player.strategy_model.apply(player.init_weights)
-            optimizer = torch.optim.Adam(player.strategy_model.parameters(), lr=LearningRate_adv)
-            player.train_network(criterion, optimizer, train_adv=False)
-        utility.append(real_play(player_list[0].strategy_model, player_list[1].strategy_model, history, graph, info_set))
+        for _, info in info_set.items():
+            info.strategy_sum += get_strategy(player_list[info.player].adv_model, info)
+            info.average_strategy = info.get_average_strategy()
+        utility.append(real_play(history, graph, info_set))
         end_time1 = datetime.datetime.now()
         print("utility: ", utility, "time: ", end_time1 - start_time1)
-        logging.info("Iteration:{}, utility:{}, time:{} ".format(t, utility, end_time1 - start_time1))
-        #player.evaluate_model()
+    plt.plot(utility)
+    plt.show()
+    '''if t % 5 == 0:
+            for player in player_list:
+                criterion = My_loss()
+                player.strategy_model.apply(player.init_weights)
+                optimizer = torch.optim.Adam(player.strategy_model.parameters(), lr=LearningRate_adv)
+                player.train_network(criterion, optimizer, train_adv=False)
+            utility.append(real_play(player_list[0].strategy_model, player_list[1].strategy_model, history, graph, info_set))
+            end_time1 = datetime.datetime.now()
+            print("utility: ", utility, "time: ", end_time1 - start_time1)
+            logging.info("Iteration:{}, utility:{}, time:{} ".format(t, utility, end_time1 - start_time1))
+        #player.evaluate_model()'''
 
 
 # for param in player.model.parameters():
@@ -331,4 +364,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+    '''info = cfr.InformationSet('sfsdf', [2, (1, 6), 3, (4, 5)], [2, 3], 2)
+    a = 4
+    print(connect(info, a))'''
 
